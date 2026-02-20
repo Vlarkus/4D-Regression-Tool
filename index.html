@@ -308,8 +308,47 @@
 
                     <div class="sec">
                         <div class="sec-hd">Regression Model</div>
-                        <label class="row"><input type="checkbox" id="ck-reg"> Show regression plane</label>
-                        <div id="stats" class="stats-box">Enable regression to fit a plane.</div>
+                        <label class="row"><input type="checkbox" id="ck-reg"> Show regression surface</label>
+                        <label>Model type</label>
+                        <select id="sel-model">
+                            <option value="linear4d">Linear 4D: aX + bY + cW + d</option>
+                            <option value="interaction4d">Interaction 4D: includes XY, XW, YW terms</option>
+                            <option value="quadratic4d">Quadratic 4D: full 2nd order in X,Y,W</option>
+                            <option value="cubic4d">Cubic 4D: full 3rd order in X,Y,W</option>
+                            <option value="log4d">Log-Linear 4D: a·ln(X) + b·ln(Y) + c·ln(W) + d</option>
+                            <option value="exp4d">Exp-Linear 4D: exp(aX + bY + cW + d)</option>
+                        </select>
+                        <label>Display mode</label>
+                        <select id="sel-surfmode">
+                            <option value="segment">Segment — fixed W slice</option>
+                            <option value="space">Space — all W slices</option>
+                        </select>
+                        <div id="wsurf-row" style="display:none">
+                            <label>W fixed on surface: <span class="range-val" id="lbl-wsurf">—</span></label>
+                            <input type="range" id="rng-wsurf" step="any" style="width:100%">
+                        </div>
+                        <div id="space-opts" style="display:none">
+                            <label>Space color scale</label>
+                            <select id="sel-surfgrad">
+                                <option value="viridis">Viridis</option>
+                                <option value="plasma">Plasma</option>
+                                <option value="inferno">Inferno</option>
+                                <option value="cool">Cool</option>
+                                <option value="bluered">Blue → Red</option>
+                                <option value="spectral">Spectral</option>
+                            </select>
+                            <label>W slices</label>
+                            <div class="range-row">
+                                <input type="range" id="rng-slices" min="4" max="20" value="10" step="1">
+                                <span class="range-val" id="lbl-slices">10</span>
+                            </div>
+                            <label>Slice opacity</label>
+                            <div class="range-row">
+                                <input type="range" id="rng-salpha" min="0.03" max="0.4" value="0.13" step="0.01">
+                                <span class="range-val" id="lbl-salpha">0.13</span>
+                            </div>
+                        </div>
+                        <div id="stats" class="stats-box">Enable regression to fit a surface.</div>
                     </div>
 
                 </div><!-- /ctrl-panel -->
@@ -391,21 +430,110 @@
         function nice(v, d = 3) { return v.toFixed(d); }
 
         // ════════════════════════════════════════════════
-        //  REGRESSION
+        //  REGRESSION — general OLS + model library
         // ════════════════════════════════════════════════
-        function fitPlane(data, cx, cy, cz) {
-            const n = data.length; if (n < 4) return null;
-            let sx = 0, sy = 0, sz = 0, sx2 = 0, sy2 = 0, sxy = 0, sxz = 0, syz = 0;
-            data.forEach(r => { const x = r[cx], y = r[cy], z = r[cz]; sx += x; sy += y; sz += z; sx2 += x * x; sy2 += y * y; sxy += x * y; sxz += x * z; syz += y * z; });
-            const det = n * (sx2 * sy2 - sxy * sxy) - sx * (sx * sy2 - sy * sxy) + sy * (sx * sxy - sy * sx2);
-            if (Math.abs(det) < 1e-14) return null;
-            const a = (sxz * (sy2 * n - sy * sy) - sxy * (syz * n - sz * sy) + sx * (syz * sy - sz * sy2)) / det;
-            const b = (sx2 * (syz * n - sy * sz) - sxz * (sxy * n - sx * sy) + sx * (sxy * sz - sx * syz)) / det;
-            const c = (sx2 * (sy2 * sz - sy * syz) - sxy * (sxy * sz - sx * syz) + sxz * (sxy * sy - sx * sy2)) / det;
-            const mz = sz / n; let ssRes = 0, ssTot = 0;
-            data.forEach(r => { const p = a * r[cx] + b * r[cy] + c; ssRes += (r[cz] - p) ** 2; ssTot += (r[cz] - mz) ** 2; });
-            return { a, b, c, r2: ssTot < 1e-14 ? 1 : 1 - (ssRes / ssTot) };
+
+        // Gaussian elimination with partial pivoting
+        function gaussElim(A, b) {
+            const n = b.length;
+            const M = A.map((row, i) => [...row, b[i]]);
+            for (let col = 0; col < n; col++) {
+                let maxR = col;
+                for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[maxR][col])) maxR = r;
+                [M[col], M[maxR]] = [M[maxR], M[col]];
+                if (Math.abs(M[col][col]) < 1e-14) return null;
+                const piv = M[col][col];
+                for (let r = 0; r < n; r++) {
+                    if (r === col) continue;
+                    const f = M[r][col] / piv;
+                    for (let c = col; c <= n; c++) M[r][c] -= f * M[col][c];
+                }
+            }
+            return M.map((row, i) => row[n] / row[i]);
         }
+
+        // Fit any model given an array of basis-function closures
+        function fitModel(data, bases, czCol) {
+            const n = data.length, k = bases.length;
+            if (n < k + 1) return null;
+            // Filter rows where all bases return finite numbers
+            const valid = data.filter(r => bases.every(f => isFinite(f(r))) && isFinite(r[czCol]));
+            if (valid.length < k + 1) return null;
+            const nv = valid.length;
+            // Build XtX (k×k) and Xty (k)
+            const XtX = Array.from({ length: k }, () => new Array(k).fill(0));
+            const Xty = new Array(k).fill(0);
+            valid.forEach(r => {
+                const phi = bases.map(f => f(r));
+                const z = r[czCol];
+                for (let i = 0; i < k; i++) {
+                    Xty[i] += phi[i] * z;
+                    for (let j = 0; j < k; j++) XtX[i][j] += phi[i] * phi[j];
+                }
+            });
+            const beta = gaussElim(XtX, Xty);
+            if (!beta) return null;
+            const predict = r => bases.reduce((s, f, i) => s + beta[i] * f(r), 0);
+            const meanZ = valid.reduce((s, r) => s + r[czCol], 0) / nv;
+            let ssRes = 0, ssTot = 0;
+            valid.forEach(r => { ssRes += (r[czCol] - predict(r)) ** 2; ssTot += (r[czCol] - meanZ) ** 2; });
+            return { beta, predict, r2: ssTot < 1e-14 ? 1 : 1 - ssRes / ssTot };
+        }
+
+        const f4 = v => v.toFixed(4);
+
+        // Model library — ALL models use all 4 dimensions (X, Y, W → Z)
+        const MODEL_DEFS = {
+            linear4d: {
+                needsW: true,
+                bases: (cx, cy, cw) => [r => r[cx], r => r[cy], r => r[cw], r => 1],
+                eqHTML: (b, cx, cy, cz, cw) => cz + ' = ' + b[0].toFixed(4) + '·' + cx + ' + ' + b[1].toFixed(4) + '·' + cy + ' + ' + b[2].toFixed(4) + '·' + cw + ' + ' + b[3].toFixed(4)
+            },
+            interaction4d: {
+                needsW: true,
+                bases: (cx, cy, cw) => [
+                    r => r[cx] * r[cy], r => r[cx] * r[cw], r => r[cy] * r[cw],
+                    r => r[cx], r => r[cy], r => r[cw], r => 1
+                ],
+                eqHTML: (b, cx, cy, cz, cw) => cz + ' = ' + b[0].toFixed(4) + '·' + cx + cy + ' + ' + b[1].toFixed(4) + '·' + cx + cw + ' + ' + b[2].toFixed(4) + '·' + cy + cw + ' + ' + b[3].toFixed(4) + '·' + cx + ' + ' + b[4].toFixed(4) + '·' + cy + ' + ' + b[5].toFixed(4) + '·' + cw + ' + ' + b[6].toFixed(4)
+            },
+            quadratic4d: {
+                needsW: true,
+                bases: (cx, cy, cw) => [
+                    r => r[cx] ** 2, r => r[cy] ** 2, r => r[cw] ** 2,
+                    r => r[cx] * r[cy], r => r[cx] * r[cw], r => r[cy] * r[cw],
+                    r => r[cx], r => r[cy], r => r[cw], r => 1
+                ],
+                eqHTML: (b, cx, cy, cz, cw) => cz + ' = ' + b[0].toFixed(4) + '·' + cx + '² + ' + b[1].toFixed(4) + '·' + cy + '² + ' + b[2].toFixed(4) + '·' + cw + '² + ' + b[3].toFixed(4) + '·' + cx + cy + ' + ' + b[4].toFixed(4) + '·' + cx + cw + ' + ' + b[5].toFixed(4) + '·' + cy + cw + ' + ' + b[6].toFixed(4) + '·' + cx + ' + ' + b[7].toFixed(4) + '·' + cy + ' + ' + b[8].toFixed(4) + '·' + cw + ' + ' + b[9].toFixed(4)
+            },
+            cubic4d: {
+                needsW: true,
+                bases: (cx, cy, cw) => [
+                    r => r[cx] ** 3, r => r[cy] ** 3, r => r[cw] ** 3,
+                    r => r[cx] ** 2 * r[cy], r => r[cx] ** 2 * r[cw],
+                    r => r[cy] ** 2 * r[cx], r => r[cy] ** 2 * r[cw],
+                    r => r[cw] ** 2 * r[cx], r => r[cw] ** 2 * r[cy],
+                    r => r[cx] * r[cy] * r[cw],
+                    r => r[cx] ** 2, r => r[cy] ** 2, r => r[cw] ** 2,
+                    r => r[cx] * r[cy], r => r[cx] * r[cw], r => r[cy] * r[cw],
+                    r => r[cx], r => r[cy], r => r[cw], r => 1
+                ],
+                eqHTML: (b, cx, cy, cz, cw) => cz + ' = ' + b[0].toFixed(4) + '·' + cx + '³ + ' + b[1].toFixed(4) + '·' + cy + '³ + ' + b[2].toFixed(4) + '·' + cw + '³ + … (20 terms)'
+            },
+            log4d: {
+                needsW: true,
+                bases: (cx, cy, cw) => [r => Math.log(r[cx]), r => Math.log(r[cy]), r => Math.log(r[cw]), r => 1],
+                eqHTML: (b, cx, cy, cz, cw) => cz + ' = ' + b[0].toFixed(4) + '·ln(' + cx + ') + ' + b[1].toFixed(4) + '·ln(' + cy + ') + ' + b[2].toFixed(4) + '·ln(' + cw + ') + ' + b[3].toFixed(4),
+                note: 'Requires X, Y, W > 0'
+            },
+            exp4d: {
+                needsW: true,
+                isExpLinear: true,
+                bases: (cx, cy, cw) => [r => r[cx], r => r[cy], r => r[cw], r => 1],
+                eqHTML: (b, cx, cy, cz, cw) => cz + ' = exp(' + b[0].toFixed(4) + '·' + cx + ' + ' + b[1].toFixed(4) + '·' + cy + ' + ' + b[2].toFixed(4) + '·' + cw + ' + ' + b[3].toFixed(4) + ')',
+                note: 'Requires Z > 0 (fits ln(Z) = aX + bY + cW + d)'
+            }
+        };
 
         // ════════════════════════════════════════════════
         //  DRAW
@@ -543,33 +671,53 @@
             ctx.fillStyle = '#c4b5fd';
             const zLbl = proj([-1.3, -1.15, 0]); ctx.fillText(colZ, zLbl[0], zLbl[1]);
 
-            // ── Regression plane ──
+            // ── Regression surface ──
             if (showReg && regResult) {
-                const { a, b, c } = regResult;
-                const STEPS = 14;
-                const grid = [];
-                for (let i = 0; i <= STEPS; i++) {
-                    grid[i] = [];
-                    for (let j = 0; j <= STEPS; j++) {
-                        const xv = xMn + (xMx - xMn) * (i / STEPS);
-                        const yv = yMn + (yMx - yMn) * (j / STEPS);
-                        const zv = a * xv + b * yv + c;
-                        grid[i][j] = proj([nx(xv), ny(yv), nz(zv)]);
+                const STEPS = 12;
+                const allQuads = [];
+
+                function buildSlice(wVal, fillColor, strokeColor) {
+                    const grid = [];
+                    for (let i = 0; i <= STEPS; i++) {
+                        grid[i] = [];
+                        for (let j = 0; j <= STEPS; j++) {
+                            const xv = xMn + (xMx - xMn) * (i / STEPS);
+                            const yv = yMn + (yMx - yMn) * (j / STEPS);
+                            const fakeRow = { [colX]: xv, [colY]: yv, [colZ]: 0, [colW]: wVal };
+                            const zv = regResult.predict(fakeRow);
+                            const nzv = isFinite(zv) ? nz(Math.max(zMn, Math.min(zMx, zv))) : null;
+                            grid[i][j] = nzv !== null ? proj([nx(xv), ny(yv), nzv]) : null;
+                        }
+                    }
+                    for (let i = 0; i < STEPS; i++) for (let j = 0; j < STEPS; j++) {
+                        const p00 = grid[i][j], p10 = grid[i + 1][j], p11 = grid[i + 1][j + 1], p01 = grid[i][j + 1];
+                        if (!p00 || !p10 || !p11 || !p01) continue;
+                        allQuads.push({ z: (p00[2] + p10[2] + p11[2] + p01[2]) / 4, pts: [p00, p10, p11, p01], fill: fillColor, stroke: strokeColor });
                     }
                 }
-                // Collect quads with their z depth, sort back-to-front
-                const quads = [];
-                for (let i = 0; i < STEPS; i++) for (let j = 0; j < STEPS; j++) {
-                    const a00 = grid[i][j], a10 = grid[i + 1][j], a11 = grid[i + 1][j + 1], a01 = grid[i][j + 1];
-                    quads.push({ z: (a00[2] + a10[2] + a11[2] + a01[2]) / 4, pts: [a00, a10, a11, a01] });
+
+                if (surfMode === 'segment') {
+                    buildSlice(wSurfVal, 'rgba(139,92,246,0.18)', 'rgba(139,92,246,0.4)');
+                } else {
+                    const N = surfSlices;
+                    for (let k = 0; k < N; k++) {
+                        const wVal = wAbsMin + (wAbsMax - wAbsMin) * (k / Math.max(N - 1, 1));
+                        const wt = (wVal - wAbsMin) / (wAbsMax - wAbsMin || 1);
+                        const [rc, gc, bc] = sampleCmap(wt, surfGrad);
+                        buildSlice(wVal,
+                            `rgba(${rc},${gc},${bc},${surfAlpha})`,
+                            `rgba(${rc},${gc},${bc},${Math.min(1, surfAlpha * 2.5)})`
+                        );
+                    }
                 }
-                quads.sort((a, b) => a.z - b.z);
-                quads.forEach(({ pts: [p00, p10, p11, p01] }) => {
+
+                allQuads.sort((a, b) => b.z - a.z);
+                allQuads.forEach(({ pts: [p00, p10, p11, p01], fill, stroke }) => {
                     ctx.beginPath();
                     ctx.moveTo(p00[0], p00[1]); ctx.lineTo(p10[0], p10[1]);
                     ctx.lineTo(p11[0], p11[1]); ctx.lineTo(p01[0], p01[1]); ctx.closePath();
-                    ctx.fillStyle = 'rgba(139,92,246,0.18)'; ctx.fill();
-                    ctx.strokeStyle = 'rgba(139,92,246,0.35)'; ctx.lineWidth = 0.6; ctx.stroke();
+                    ctx.fillStyle = fill; ctx.fill();
+                    ctx.strokeStyle = stroke; ctx.lineWidth = 0.5; ctx.stroke();
                 });
             }
 
@@ -682,26 +830,89 @@
             updateReg(); draw();
         }
 
-        function updateReg() {
-            if (showReg) {
-                regResult = fitPlane(rows, colX, colY, colZ);
-                if (regResult) {
-                    const { a, b, c, r2 } = regResult;
-                    statsDiv.innerHTML = `<b>R²</b> = <span class="r2">${r2.toFixed(5)}</span><br><span class="eq">${colZ} = ${a.toFixed(4)}·${colX} + ${b.toFixed(4)}·${colY} + ${c.toFixed(4)}</span>`;
-                } else {
-                    statsDiv.innerHTML = '<span style="color:#f87171">Could not fit (degenerate data).</span>';
+        let wSurfVal = 0;
+        let surfMode = 'segment', surfGrad = 'viridis', surfSlices = 10, surfAlpha = 0.13;
+
+        function updateWsurfSlider() {
+            const on = showReg;
+            wsurfRow.style.display = (on && surfMode === 'segment') ? 'block' : 'none';
+            spaceOpts.style.display = (on && surfMode === 'space') ? 'block' : 'none';
+            if (on) {
+                rngWsurf.min = wAbsMin; rngWsurf.max = wAbsMax;
+                if (wSurfVal < wAbsMin || wSurfVal > wAbsMax) {
+                    wSurfVal = (wAbsMin + wAbsMax) / 2;
+                    rngWsurf.value = wSurfVal;
                 }
-            } else {
-                regResult = null;
-                statsDiv.textContent = 'Enable regression to fit a plane.';
+                lblWsurf.textContent = wSurfVal.toFixed(3);
             }
         }
+
+        function updateReg() {
+            if (showReg) {
+                const modelKey = selModel.value;
+                const def = MODEL_DEFS[modelKey];
+                if (!def) return;
+
+                let dataForFit = rows;
+                let czCol = colZ;
+
+                if (def.isExpLinear) {
+                    // Fit ln(Z) instead of Z; predict returns exp(...)
+                    dataForFit = rows.map(r => ({ ...r, [colZ + '__ln']: Math.log(r[colZ]) })).filter(r => isFinite(r[colZ + '__ln']));
+                    czCol = colZ + '__ln';
+                }
+
+                const bases = def.bases(colX, colY, colW);
+                const fit = fitModel(dataForFit, bases, czCol);
+
+                if (!fit) {
+                    statsDiv.innerHTML = '<span style="color:#f87171">Could not fit (degenerate / insufficient data).</span>';
+                    regResult = null; return;
+                }
+
+                if (def.isExpLinear) {
+                    // Wrap predict to return exp of the linear fit
+                    const innerPredict = fit.predict;
+                    fit.predict = r => Math.exp(innerPredict({ ...r, [colZ + '__ln']: Math.log(r[colZ] || 1) }));
+                    // Re-compute R² on original Z scale
+                    const meanZ = rows.reduce((s, r) => s + r[colZ], 0) / rows.length;
+                    let ssRes = 0, ssTot = 0;
+                    rows.forEach(r => { ssRes += (r[colZ] - fit.predict(r)) ** 2; ssTot += (r[colZ] - meanZ) ** 2; });
+                    fit.r2 = ssTot < 1e-14 ? 1 : 1 - ssRes / ssTot;
+                }
+
+                regResult = fit;
+                const noteHtml = def.note ? `<br><span style="color:#fbbf24;font-size:.72rem">${def.note}</span>` : '';
+                statsDiv.innerHTML = `<b>R²</b> = <span class="r2">${fit.r2.toFixed(5)}</span>  (n=${rows.length})<br><span class="eq">${def.eqHTML(fit.beta, colX, colY, colZ, colW)}</span>${noteHtml}`;
+            } else {
+                regResult = null;
+                statsDiv.textContent = 'Enable regression to fit a surface.';
+            }
+        }
+
+        const selModel = $('sel-model');
+        const selSurfmode = $('sel-surfmode');
+        const selSurfgrad = $('sel-surfgrad');
+        const wsurfRow = $('wsurf-row');
+        const spaceOpts = $('space-opts');
+        const rngWsurf = $('rng-wsurf');
+        const lblWsurf = $('lbl-wsurf');
+        const rngSlices = $('rng-slices');
+        const lblSlices = $('lbl-slices');
+        const rngSalpha = $('rng-salpha');
+        const lblSalpha = $('lbl-salpha');
 
         [sx, sy, sz, sw].forEach(s => s.addEventListener('change', applyMapping));
         ckPts.addEventListener('change', () => { showPts = ckPts.checked; draw(); });
         ckCol.addEventListener('change', () => { colorByW = ckCol.checked; draw(); });
         selGrad.addEventListener('change', () => { gradName = selGrad.value; draw(); });
-        ckReg.addEventListener('change', () => { showReg = ckReg.checked; updateReg(); draw(); });
+        ckReg.addEventListener('change', () => { showReg = ckReg.checked; updateWsurfSlider(); updateReg(); draw(); });
+        selModel.addEventListener('change', () => { updateWsurfSlider(); updateReg(); draw(); });
+        selSurfmode.addEventListener('change', () => { surfMode = selSurfmode.value; updateWsurfSlider(); draw(); });
+        selSurfgrad.addEventListener('change', () => { surfGrad = selSurfgrad.value; draw(); });
+        rngSlices.addEventListener('input', () => { surfSlices = parseInt(rngSlices.value); lblSlices.textContent = surfSlices; draw(); });
+        rngSalpha.addEventListener('input', () => { surfAlpha = parseFloat(rngSalpha.value); lblSalpha.textContent = surfAlpha.toFixed(2); draw(); });
+        rngWsurf.addEventListener('input', () => { wSurfVal = parseFloat(rngWsurf.value); lblWsurf.textContent = wSurfVal.toFixed(3); draw(); });
         rngLo.addEventListener('input', () => {
             wLoVal = parseFloat(rngLo.value);
             if (wLoVal > wHiVal) { wHiVal = wLoVal; rngHi.value = wLoVal; }
