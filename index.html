@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4D Regression Visualizer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        :root {
+            --bg: #111827;
+            --panel: #1f2937;
+            --border: #374151;
+            --text: #f9fafb;
+            --muted: #9ca3af;
+            --accent: #60a5fa;
+            --accent2: #a78bfa;
+            --green: #34d399
+        }
+
+        html,
+        body {
+            height: 100%;
+            width: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            overflow: hidden
+        }
+
+        #app {
+            display: flex;
+            height: 100vh
+        }
+
+        /* ── Sidebar ── */
+        #sidebar {
+            width: 300px;
+            min-width: 300px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden
+        }
+
+        #sb-inner {
+            flex: 1;
+            overflow-y: auto;
+            padding: 14px 14px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px
+        }
+
+        #sb-inner::-webkit-scrollbar {
+            width: 3px
+        }
+
+        #sb-inner::-webkit-scrollbar-thumb {
+            background: var(--border)
+        }
+
+        .logo {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: .03em;
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .logo svg {
+            flex-shrink: 0
+        }
+
+        .sec {
+            display: flex;
+            flex-direction: column;
+            gap: 6px
+        }
+
+        .sec-hd {
+            font-size: .65rem;
+            font-weight: 700;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 4px;
+            margin-bottom: 2px
+        }
+
+        label {
+            font-size: .78rem;
+            color: var(--muted)
+        }
+
+        select {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 5px 8px;
+            border-radius: 6px;
+            font-size: .82rem;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 28px
+        }
+
+        select:focus {
+            outline: 1px solid var(--accent);
+            outline-offset: 1px
+        }
+
+        .row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: .82rem;
+            color: var(--muted);
+            cursor: pointer
+        }
+
+        .row input[type=checkbox] {
+            width: 15px;
+            height: 15px;
+            accent-color: var(--accent);
+            cursor: pointer;
+            flex-shrink: 0
+        }
+
+        .range-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 3px
+        }
+
+        .range-row {
+            display: flex;
+            align-items: center;
+            gap: 8px
+        }
+
+        .range-row input {
+            flex: 1;
+            accent-color: var(--accent);
+            cursor: pointer
+        }
+
+        .range-val {
+            font-size: .72rem;
+            color: var(--accent2);
+            min-width: 50px;
+            text-align: right;
+            font-variant-numeric: tabular-nums
+        }
+
+        .stats-box {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            font-size: .8rem;
+            line-height: 1.8;
+            color: var(--text)
+        }
+
+        .r2 {
+            color: var(--green);
+            font-weight: 700;
+            font-size: .95rem
+        }
+
+        .eq {
+            color: var(--accent2);
+            font-family: 'Courier New', monospace;
+            font-size: .75rem;
+            word-break: break-all
+        }
+
+        #status {
+            font-size: .7rem;
+            color: var(--muted);
+            min-height: 14px
+        }
+
+        .btn {
+            width: 100%;
+            background: var(--accent);
+            color: #0d1117;
+            border: none;
+            border-radius: 6px;
+            padding: 7px;
+            font-size: .82rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity .15s
+        }
+
+        .btn:hover {
+            opacity: .85
+        }
+
+        /* ── Main ── */
+        #main {
+            flex: 1;
+            position: relative;
+            background: var(--bg)
+        }
+
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            cursor: grab
+        }
+
+        #canvas.dragging {
+            cursor: grabbing
+        }
+
+        #hint {
+            position: absolute;
+            bottom: 12px;
+            right: 14px;
+            font-size: .65rem;
+            color: #4b5563;
+            line-height: 1.8;
+            text-align: right;
+            pointer-events: none
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <div id="sidebar">
+            <div id="sb-inner">
+
+                <div class="logo">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3l18 18M3 21L21 3" />
+                        <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    4D Regression
+                </div>
+
+                <div class="sec">
+                    <div class="sec-hd">Data</div>
+                    <label>CSV file (from /data)</label>
+                    <select id="file-sel">
+                        <option>Scanning…</option>
+                    </select>
+                    <div id="status">Starting server…</div>
+                </div>
+
+                <div id="ctrl-panel" style="display:none;flex-direction:column;gap:14px">
+
+                    <div class="sec">
+                        <div class="sec-hd">Axis Mapping</div>
+                        <label>X</label><select id="sx"></select>
+                        <label>Y</label><select id="sy"></select>
+                        <label>Z</label><select id="sz"></select>
+                        <label>4th Dimension (W)</label><select id="sw"></select>
+                    </div>
+
+                    <div class="sec">
+                        <div class="sec-hd">Visibility</div>
+                        <label class="row"><input type="checkbox" id="ck-pts" checked> Show points</label>
+                        <label class="row"><input type="checkbox" id="ck-col" checked> Color by W</label>
+                        <label>Color scale</label>
+                        <select id="sel-grad">
+                            <option value="viridis">Viridis</option>
+                            <option value="plasma">Plasma</option>
+                            <option value="inferno">Inferno</option>
+                            <option value="cool">Cool</option>
+                            <option value="bluered">Blue → Red</option>
+                            <option value="spectral">Spectral</option>
+                        </select>
+                    </div>
+
+                    <div class="sec">
+                        <div class="sec-hd">4th Dimension Filter</div>
+                        <div class="range-wrap">
+                            <div class="range-row">
+                                <span style="width:30px;font-size:.7rem;color:var(--muted)">Min</span>
+                                <input type="range" id="rng-lo" step="any">
+                                <span class="range-val" id="lbl-lo">—</span>
+                            </div>
+                            <div class="range-row">
+                                <span style="width:30px;font-size:.7rem;color:var(--muted)">Max</span>
+                                <input type="range" id="rng-hi" step="any">
+                                <span class="range-val" id="lbl-hi">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sec">
+                        <div class="sec-hd">Regression Model</div>
+                        <label class="row"><input type="checkbox" id="ck-reg"> Show regression plane</label>
+                        <div id="stats" class="stats-box">Enable regression to fit a plane.</div>
+                    </div>
+
+                </div><!-- /ctrl-panel -->
+            </div>
+        </div>
+
+        <div id="main">
+            <canvas id="canvas"></canvas>
+            <div id="hint">Drag: rotate &nbsp;·&nbsp; Scroll: zoom &nbsp;·&nbsp; Right-drag: pan</div>
+        </div>
+    </div>
+
+    <script>
+        // ════════════════════════════════════════════════
+        //  COLOUR MAPS
+        // ════════════════════════════════════════════════
+        const CMAPS = {
+            viridis: [[68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142], [31, 158, 137], [53, 183, 121], [110, 206, 88], [181, 222, 43], [253, 231, 37]],
+            plasma: [[13, 8, 135], [75, 3, 161], [125, 3, 168], [168, 34, 150], [203, 70, 121], [229, 107, 93], [248, 148, 65], [253, 195, 40], [240, 249, 33]],
+            inferno: [[0, 0, 4], [40, 11, 84], [101, 21, 110], [159, 42, 99], [212, 72, 66], [245, 125, 21], [252, 185, 80], [252, 255, 164]].reverse(),
+            cool: [[0, 255, 255], [50, 200, 255], [100, 150, 255], [150, 100, 255], [200, 50, 255], [255, 0, 255]],
+            bluered: [[0, 0, 200], [0, 80, 255], [0, 200, 255], [80, 255, 180], [200, 255, 0], [255, 200, 0], [255, 80, 0], [200, 0, 0]],
+            spectral: [[94, 79, 162], [50, 136, 189], [102, 194, 165], [171, 221, 164], [230, 245, 152], [255, 255, 191], [254, 224, 139], [253, 174, 97], [244, 109, 67], [213, 62, 79], [158, 1, 66]]
+        };
+        function sampleCmap(t, name) {
+            const s = CMAPS[name] || CMAPS.viridis;
+            t = Math.max(0, Math.min(1, t));
+            const pos = t * (s.length - 1), lo = Math.floor(pos), hi = Math.min(lo + 1, s.length - 1), f = pos - lo;
+            const r = (s[lo][0] + f * (s[hi][0] - s[lo][0])) | 0;
+            const g = (s[lo][1] + f * (s[hi][1] - s[lo][1])) | 0;
+            const b = (s[lo][2] + f * (s[hi][2] - s[lo][2])) | 0;
+            return [r, g, b];
+        }
+
+        // ════════════════════════════════════════════════
+        //  MATH / PROJECTION
+        // ════════════════════════════════════════════════
+        let camTheta = 0.8, camPhi = 0.5, camZoom = 420, camPanX = 0, camPanY = 0;
+
+        function rotate(p, theta, phi) {
+            let [x, y, z] = p;
+            // Rotate around Y
+            let x1 = x * Math.cos(theta) + z * Math.sin(theta);
+            let z1 = -x * Math.sin(theta) + z * Math.cos(theta);
+            let y1 = y;
+            // Rotate around X
+            let x2 = x1;
+            let y2 = y1 * Math.cos(phi) - z1 * Math.sin(phi);
+            let z2 = y1 * Math.sin(phi) + z1 * Math.cos(phi);
+            return [x2, y2, z2];
+        }
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        function proj(p3) {
+            const [x, y, z] = rotate(p3, camTheta, camPhi);
+            const fov = camZoom;
+            const dz = z + 5;
+            const px = x * fov / dz + canvas.width / 2 + camPanX;
+            const py = -y * fov / dz + canvas.height / 2 + camPanY;
+            return [px, py, z];
+        }
+
+        // ════════════════════════════════════════════════
+        //  DATA STATE
+        // ════════════════════════════════════════════════
+        let rows = [], hdr = [], colX = '', colY = '', colZ = '', colW = '';
+        let wAbsMin = 0, wAbsMax = 1, wLoVal = 0, wHiVal = 1;
+        let showPts = true, colorByW = true, showReg = false, gradName = 'viridis';
+        let regResult = null;
+
+        // ════════════════════════════════════════════════
+        //  HELPERS
+        // ════════════════════════════════════════════════
+        function getVals(col) { return rows.map(r => r[col]).filter(v => typeof v === 'number'); }
+        function minmax(col) { const v = getVals(col); return [Math.min(...v), Math.max(...v)]; }
+        function norm(v, mn, mx) { return mx === mn ? 0 : (v - mn) / (mx - mn) * 2 - 1; }
+        function nice(v, d = 3) { return v.toFixed(d); }
+
+        // ════════════════════════════════════════════════
+        //  REGRESSION
+        // ════════════════════════════════════════════════
+        function fitPlane(data, cx, cy, cz) {
+            const n = data.length; if (n < 4) return null;
+            let sx = 0, sy = 0, sz = 0, sx2 = 0, sy2 = 0, sxy = 0, sxz = 0, syz = 0;
+            data.forEach(r => { const x = r[cx], y = r[cy], z = r[cz]; sx += x; sy += y; sz += z; sx2 += x * x; sy2 += y * y; sxy += x * y; sxz += x * z; syz += y * z; });
+            const det = n * (sx2 * sy2 - sxy * sxy) - sx * (sx * sy2 - sy * sxy) + sy * (sx * sxy - sy * sx2);
+            if (Math.abs(det) < 1e-14) return null;
+            const a = (sxz * (sy2 * n - sy * sy) - sxy * (syz * n - sz * sy) + sx * (syz * sy - sz * sy2)) / det;
+            const b = (sx2 * (syz * n - sy * sz) - sxz * (sxy * n - sx * sy) + sx * (sxy * sz - sx * syz)) / det;
+            const c = (sx2 * (sy2 * sz - sy * syz) - sxy * (sxy * sz - sx * syz) + sxz * (sxy * sy - sx * sy2)) / det;
+            const mz = sz / n; let ssRes = 0, ssTot = 0;
+            data.forEach(r => { const p = a * r[cx] + b * r[cy] + c; ssRes += (r[cz] - p) ** 2; ssTot += (r[cz] - mz) ** 2; });
+            return { a, b, c, r2: ssTot < 1e-14 ? 1 : 1 - (ssRes / ssTot) };
+        }
+
+        // ════════════════════════════════════════════════
+        //  DRAW
+        // ════════════════════════════════════════════════
+        function draw() {
+            const W = canvas.width, H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+
+            // Dark background matching Plotly default
+            ctx.fillStyle = '#1c2333';
+            ctx.fillRect(0, 0, W, H);
+
+            if (!rows.length) {
+                ctx.fillStyle = '#6b7280'; ctx.font = '15px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText('Select a data file from the sidebar', W / 2, H / 2); return;
+            }
+
+            const [xMn, xMx] = minmax(colX), [yMn, yMx] = minmax(colY), [zMn, zMx] = minmax(colZ);
+            const [wMn, wMx] = [wAbsMin, wAbsMax];
+
+            // ── Build tick layout ──
+            function makeTicks(lo, hi, n = 5) {
+                const step = (hi - lo) / (n - 1);
+                return Array.from({ length: n }, (_, i) => lo + i * step);
+            }
+            const xTicks = makeTicks(xMn, xMx), yTicks = makeTicks(yMn, yMx), zTicks = makeTicks(zMn, zMx);
+            function nx(v) { return norm(v, xMn, xMx); }
+            function ny(v) { return norm(v, yMn, yMx); }
+            function nz(v) { return norm(v, zMn, zMx); }
+
+            // ── Cube corners (normalised -1..1) ──
+            const C = {
+                lll: [-1, -1, -1], rll: [1, -1, -1], rrl: [1, 1, -1], lrl: [-1, 1, -1],
+                llh: [-1, -1, 1], rlh: [1, -1, 1], rrh: [1, 1, 1], lrh: [-1, 1, 1]
+            };
+
+            // Project and get avg depth of each face for back-face ordering
+            function faceZ(pts) { return pts.reduce((s, p) => s + rotate(p, camTheta, camPhi)[2], 0) / pts.length; }
+
+            // ── Grid helper ──
+            function drawGrid(corner, axU, axV, colU, colV, numU, numV, styleStroke) {
+                ctx.strokeStyle = styleStroke;
+                ctx.lineWidth = 0.8;
+                // Lines along U direction (varying V)
+                for (let v = 0; v <= numV; v++) {
+                    const t = v / numV;
+                    const start = [corner[0] + t * axV[0], corner[1] + t * axV[1], corner[2] + t * axV[2]];
+                    const end = [start[0] + axU[0], start[1] + axU[1], start[2] + axU[2]];
+                    const ps = proj(start), pe = proj(end);
+                    ctx.beginPath(); ctx.moveTo(ps[0], ps[1]); ctx.lineTo(pe[0], pe[1]); ctx.stroke();
+                }
+                // Lines along V direction (varying U)
+                for (let u = 0; u <= numU; u++) {
+                    const t = u / numU;
+                    const start = [corner[0] + t * axU[0], corner[1] + t * axU[1], corner[2] + t * axU[2]];
+                    const end = [start[0] + axV[0], start[1] + axV[1], start[2] + axV[2]];
+                    const ps = proj(start), pe = proj(end);
+                    ctx.beginPath(); ctx.moveTo(ps[0], ps[1]); ctx.lineTo(pe[0], pe[1]); ctx.stroke();
+                }
+            }
+
+            // ── Determine which of the 3 floor/wall faces to show (back-facing) ──
+            // Floor (y=-1), left wall (x=-1), back wall (z=-1)
+            const floorZ = faceZ([C.lll, C.rll, C.rlh, C.llh]);
+            const wallXZ = faceZ([C.lll, C.lrl, C.lrh, C.llh]);
+            const wallZZ = faceZ([C.lll, C.rll, C.rrl, C.lrl]);
+
+            // Sort faces back to front
+            const bgFaces = [
+                {
+                    z: floorZ, draw: () => {
+                        ctx.fillStyle = 'rgba(30,40,60,0.6)';
+                        const pts = [C.lll, C.rll, C.rlh, C.llh].map(proj);
+                        ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fill();
+                        drawGrid([-1, -1, -1], [2, 0, 0], [0, 0, 2], 'x', 'z', 5, 5, 'rgba(80,100,140,0.45)');
+                    }
+                },
+                {
+                    z: wallXZ, draw: () => {
+                        ctx.fillStyle = 'rgba(28,38,58,0.55)';
+                        const pts = [C.lll, C.lrl, C.lrh, C.llh].map(proj);
+                        ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fill();
+                        drawGrid([-1, -1, -1], [0, 2, 0], [0, 0, 2], 'y', 'z', 5, 5, 'rgba(80,100,140,0.45)');
+                    }
+                },
+                {
+                    z: wallZZ, draw: () => {
+                        ctx.fillStyle = 'rgba(26,36,56,0.5)';
+                        const pts = [C.lll, C.rll, C.rrl, C.lrl].map(proj);
+                        ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fill();
+                        drawGrid([-1, -1, -1], [2, 0, 0], [0, 2, 0], 'x', 'y', 5, 5, 'rgba(80,100,140,0.45)');
+                    }
+                },
+            ].sort((a, b) => a.z - b.z);
+            bgFaces.forEach(f => f.draw());
+
+            // ── Cube edges ──
+            const edges = [
+                [C.lll, C.rll], [C.rll, C.rrl], [C.rrl, C.lrl], [C.lrl, C.lll],
+                [C.llh, C.rlh], [C.rlh, C.rrh], [C.rrh, C.lrh], [C.lrh, C.llh],
+                [C.lll, C.llh], [C.rll, C.rlh], [C.rrl, C.rrh], [C.lrl, C.lrh]
+            ];
+            ctx.strokeStyle = 'rgba(100,130,180,0.5)'; ctx.lineWidth = 1;
+            edges.forEach(([a, b]) => {
+                const pa = proj(a), pb = proj(b);
+                ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
+            });
+
+            // ── Axis tick labels ──
+            ctx.textAlign = 'center'; ctx.font = `${Math.round(10 * devicePixelRatio * 0.7)}px 'Courier New',monospace`;
+            ctx.fillStyle = '#8090b0';
+            const tickLen = 0.07;
+            // X ticks along bottom-front edge
+            xTicks.forEach(v => {
+                const p = proj([nx(v), -1, -1]);
+                ctx.fillText(v.toFixed(1), p[0], p[1] + 14);
+            });
+            // Y ticks along left-front edge
+            yTicks.forEach(v => {
+                const p = proj([-1, ny(v), -1]);
+                ctx.fillText(v.toFixed(1), p[0] - 20, p[1] + 4);
+            });
+            // Z ticks along back-left vertical edge
+            zTicks.forEach(v => {
+                const p = proj([-1, -1, nz(v)]);
+                ctx.fillText(v.toFixed(1), p[0] - 20, p[1] + 4);
+            });
+
+            // ── Axis labels ──
+            ctx.font = `bold ${Math.round(12 * devicePixelRatio * 0.65)}px system-ui`;
+            ctx.fillStyle = '#93c5fd';
+            const xLbl = proj([0, -1.22, -1.22]); ctx.fillText(colX, xLbl[0], xLbl[1]);
+            ctx.fillStyle = '#86efac';
+            const yLbl = proj([-1.28, 0, -1.22]); ctx.fillText(colY, yLbl[0], yLbl[1]);
+            ctx.fillStyle = '#c4b5fd';
+            const zLbl = proj([-1.3, -1.15, 0]); ctx.fillText(colZ, zLbl[0], zLbl[1]);
+
+            // ── Regression plane ──
+            if (showReg && regResult) {
+                const { a, b, c } = regResult;
+                const STEPS = 14;
+                const grid = [];
+                for (let i = 0; i <= STEPS; i++) {
+                    grid[i] = [];
+                    for (let j = 0; j <= STEPS; j++) {
+                        const xv = xMn + (xMx - xMn) * (i / STEPS);
+                        const yv = yMn + (yMx - yMn) * (j / STEPS);
+                        const zv = a * xv + b * yv + c;
+                        grid[i][j] = proj([nx(xv), ny(yv), nz(zv)]);
+                    }
+                }
+                // Collect quads with their z depth, sort back-to-front
+                const quads = [];
+                for (let i = 0; i < STEPS; i++) for (let j = 0; j < STEPS; j++) {
+                    const a00 = grid[i][j], a10 = grid[i + 1][j], a11 = grid[i + 1][j + 1], a01 = grid[i][j + 1];
+                    quads.push({ z: (a00[2] + a10[2] + a11[2] + a01[2]) / 4, pts: [a00, a10, a11, a01] });
+                }
+                quads.sort((a, b) => a.z - b.z);
+                quads.forEach(({ pts: [p00, p10, p11, p01] }) => {
+                    ctx.beginPath();
+                    ctx.moveTo(p00[0], p00[1]); ctx.lineTo(p10[0], p10[1]);
+                    ctx.lineTo(p11[0], p11[1]); ctx.lineTo(p01[0], p01[1]); ctx.closePath();
+                    ctx.fillStyle = 'rgba(139,92,246,0.18)'; ctx.fill();
+                    ctx.strokeStyle = 'rgba(139,92,246,0.35)'; ctx.lineWidth = 0.6; ctx.stroke();
+                });
+            }
+
+            // ── Points ──
+            if (showPts) {
+                const visible = rows.filter(r => {
+                    const w = r[colW];
+                    return typeof w === 'number' && w >= wLoVal && w <= wHiVal;
+                });
+                // Project all, depth sort
+                const pts = visible.map(r => {
+                    const xv = r[colX], yv = r[colY], zv = r[colZ], wv = r[colW];
+                    if ([xv, yv, zv, wv].some(v => typeof v !== 'number')) return null;
+                    const p = proj([nx(xv), ny(yv), nz(zv)]);
+                    const wt = (wv - wMn) / (wMx - wMn || 1);
+                    return { p, wt };
+                }).filter(Boolean);
+                pts.sort((a, b) => b.p[2] - a.p[2]);
+
+                const pr = Math.max(3, Math.min(6, 4.5 * devicePixelRatio));
+                // Pass 1: glows only — drawn first so they never overdraw any solid dot
+                pts.forEach(({ p, wt }) => {
+                    const [r, g, b] = sampleCmap(colorByW ? wt : 0.6, gradName);
+                    const grd = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], pr * 2.5);
+                    grd.addColorStop(0, `rgba(${r},${g},${b},0.2)`);
+                    grd.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.beginPath(); ctx.arc(p[0], p[1], pr * 2.5, 0, Math.PI * 2); ctx.fillStyle = grd; ctx.fill();
+                });
+                // Pass 2: solid fills + rim (back-to-front so closer points sit on top)
+                pts.forEach(({ p, wt }) => {
+                    const [r, g, b] = sampleCmap(colorByW ? wt : 0.6, gradName);
+                    ctx.beginPath(); ctx.arc(p[0], p[1], pr, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.fill();
+                    ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 0.8; ctx.stroke();
+                });
+            }
+
+            // ── Colorbar ──
+            if (colorByW && showPts) {
+                const bx = W - 32, by = H * 0.12, bh = H * 0.65, bw = 12;
+                const cg = ctx.createLinearGradient(0, by + bh, 0, by);
+                for (let i = 0; i <= 10; i++) { const [r, g, b] = sampleCmap(i / 10, gradName); cg.addColorStop(i / 10, `rgb(${r},${g},${b})`); }
+                ctx.fillStyle = cg; ctx.fillRect(bx, by, bw, bh);
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+                ctx.fillStyle = '#8090b0'; ctx.font = `${Math.round(9 * devicePixelRatio * 0.7)}px 'Courier New'`; ctx.textAlign = 'right';
+                ctx.fillText(wAbsMax.toFixed(2), bx - 4, by + 6);
+                ctx.fillText(((wAbsMin + wAbsMax) / 2).toFixed(2), bx - 4, by + bh / 2 + 4);
+                ctx.fillText(wAbsMin.toFixed(2), bx - 4, by + bh + 4);
+                ctx.save(); ctx.translate(bx - 16, by + bh / 2); ctx.rotate(-Math.PI / 2);
+                ctx.textAlign = 'center'; ctx.fillText(colW, 0, 0); ctx.restore();
+            }
+        }
+
+        // ════════════════════════════════════════════════
+        //  RESIZE
+        // ════════════════════════════════════════════════
+        function resize() {
+            canvas.width = canvas.clientWidth * devicePixelRatio;
+            canvas.height = canvas.clientHeight * devicePixelRatio;
+            draw();
+        }
+        window.addEventListener('resize', resize);
+
+        // ════════════════════════════════════════════════
+        //  MOUSE
+        // ════════════════════════════════════════════════
+        let drag = null;
+        canvas.addEventListener('mousedown', e => {
+            drag = { x: e.clientX, y: e.clientY, btn: e.button, theta: camTheta, phi: camPhi, px: camPanX, py: camPanY };
+            canvas.classList.add('dragging');
+        });
+        window.addEventListener('mousemove', e => {
+            if (!drag) return;
+            const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+            if (drag.btn === 0) { camTheta = drag.theta - dx * 0.007; camPhi = drag.phi - dy * 0.007; camPhi = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, camPhi)); }
+            else { camPanX = drag.px + dx * devicePixelRatio; camPanY = drag.py + dy * devicePixelRatio; }
+            draw();
+        });
+        window.addEventListener('mouseup', () => { drag = null; canvas.classList.remove('dragging'); });
+        canvas.addEventListener('wheel', e => { e.preventDefault(); camZoom *= e.deltaY < 0 ? 1.09 : 0.92; draw(); }, { passive: false });
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        // ════════════════════════════════════════════════
+        //  CONTROLS WIRING
+        // ════════════════════════════════════════════════
+        const fileSel = $('file-sel'), ctrlPanel = $('ctrl-panel'), statusEl = $('status');
+        const sx = $('sx'), sy = $('sy'), sz = $('sz'), sw = $('sw');
+        const ckPts = $('ck-pts'), ckCol = $('ck-col'), ckReg = $('ck-reg'), selGrad = $('sel-grad');
+        const rngLo = $('rng-lo'), rngHi = $('rng-hi'), lblLo = $('lbl-lo'), lblHi = $('lbl-hi');
+        const statsDiv = $('stats');
+        function $(id) { return document.getElementById(id); }
+
+        function populateCols() {
+            [sx, sy, sz, sw].forEach(s => {
+                s.innerHTML = '';
+                hdr.forEach(h => { const o = document.createElement('option'); o.value = h; o.textContent = h; s.appendChild(o); });
+            });
+            if (hdr.length >= 4) { sx.selectedIndex = 0; sy.selectedIndex = 1; sz.selectedIndex = 2; sw.selectedIndex = 3; }
+            applyMapping();
+        }
+
+        function applyMapping() {
+            colX = sx.value; colY = sy.value; colZ = sz.value; colW = sw.value;
+            const wv = rows.map(r => r[colW]).filter(v => typeof v === 'number');
+            wAbsMin = Math.min(...wv); wAbsMax = Math.max(...wv);
+            rngLo.min = wAbsMin; rngLo.max = wAbsMax; rngLo.value = wAbsMin;
+            rngHi.min = wAbsMin; rngHi.max = wAbsMax; rngHi.value = wAbsMax;
+            wLoVal = wAbsMin; wHiVal = wAbsMax;
+            lblLo.textContent = wAbsMin.toFixed(3); lblHi.textContent = wAbsMax.toFixed(3);
+            updateReg(); draw();
+        }
+
+        function updateReg() {
+            if (showReg) {
+                regResult = fitPlane(rows, colX, colY, colZ);
+                if (regResult) {
+                    const { a, b, c, r2 } = regResult;
+                    statsDiv.innerHTML = `<b>R²</b> = <span class="r2">${r2.toFixed(5)}</span><br><span class="eq">${colZ} = ${a.toFixed(4)}·${colX} + ${b.toFixed(4)}·${colY} + ${c.toFixed(4)}</span>`;
+                } else {
+                    statsDiv.innerHTML = '<span style="color:#f87171">Could not fit (degenerate data).</span>';
+                }
+            } else {
+                regResult = null;
+                statsDiv.textContent = 'Enable regression to fit a plane.';
+            }
+        }
+
+        [sx, sy, sz, sw].forEach(s => s.addEventListener('change', applyMapping));
+        ckPts.addEventListener('change', () => { showPts = ckPts.checked; draw(); });
+        ckCol.addEventListener('change', () => { colorByW = ckCol.checked; draw(); });
+        selGrad.addEventListener('change', () => { gradName = selGrad.value; draw(); });
+        ckReg.addEventListener('change', () => { showReg = ckReg.checked; updateReg(); draw(); });
+        rngLo.addEventListener('input', () => {
+            wLoVal = parseFloat(rngLo.value);
+            if (wLoVal > wHiVal) { wHiVal = wLoVal; rngHi.value = wLoVal; }
+            lblLo.textContent = wLoVal.toFixed(3); draw();
+        });
+        rngHi.addEventListener('input', () => {
+            wHiVal = parseFloat(rngHi.value);
+            if (wHiVal < wLoVal) { wLoVal = wHiVal; rngLo.value = wHiVal; }
+            lblHi.textContent = wHiVal.toFixed(3); draw();
+        });
+
+        // ════════════════════════════════════════════════
+        //  DATA LOADING
+        // ════════════════════════════════════════════════
+        function loadFile(name) {
+            statusEl.textContent = `Loading ${name}…`;
+            fetch('/api/data?file=' + encodeURIComponent(name))
+                .then(r => r.json())
+                .then(d => {
+                    if (d.error) { statusEl.textContent = 'Error: ' + d.error; return; }
+                    rows = d.rows; hdr = d.headers;
+                    statusEl.textContent = `${rows.length} rows · ${hdr.length} columns`;
+                    ctrlPanel.style.display = 'flex';
+                    populateCols();
+                })
+                .catch(e => statusEl.textContent = 'Load failed: ' + e);
+        }
+
+        fetch('/api/files')
+            .then(r => r.json())
+            .then(files => {
+                fileSel.innerHTML = '';
+                if (!files.length) {
+                    fileSel.innerHTML = '<option>No CSVs in /data</option>';
+                    statusEl.textContent = 'Add CSV files to the /data folder and restart.';
+                    return;
+                }
+                files.forEach(f => { const o = document.createElement('option'); o.value = f; o.textContent = f; fileSel.appendChild(o); });
+                fileSel.addEventListener('change', () => loadFile(fileSel.value));
+                loadFile(files[0]);
+            })
+            .catch(e => statusEl.textContent = 'Server error: ' + e);
+
+        resize();
+    </script>
+</body>
+
+</html>
